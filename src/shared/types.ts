@@ -42,6 +42,7 @@ export interface TimeCorrection {
 
 export interface Settings {
   archive_after_days: number;
+  waiting_nudge_days: number; // waiting this long = time to follow up
   backups_keep: number;
   jira_url: string;
   label_aliases: Record<string, string>; // "p" -> "project"
@@ -64,6 +65,7 @@ export interface Archive {
 
 export const DEFAULT_SETTINGS: Settings = {
   archive_after_days: 30,
+  waiting_nudge_days: 3,
   backups_keep: 14,
   jira_url: '',
   label_aliases: { p: 'project', m: 'module', r: 'req' },

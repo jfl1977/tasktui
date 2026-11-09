@@ -3199,6 +3199,52 @@ function addDays(iso, n) {
   d.setDate(d.getDate() + n);
   return toISODate(d);
 }
+function diffDays(a, b) {
+  return Math.round((fromISODate(a).getTime() - fromISODate(b).getTime()) / 864e5);
+}
+var WEEKDAYS = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
+function weekdayIndex(word) {
+  const w = word.toLowerCase().slice(0, 3);
+  return WEEKDAYS.indexOf(w);
+}
+function parseDate(input, today) {
+  const s = input.trim().toLowerCase();
+  if (!s) return null;
+  if (s === "today" || s === "tod" || s === "now") return today;
+  if (s === "tomorrow" || s === "tom" || s === "tmr") return addDays(today, 1);
+  if (s === "yesterday" || s === "yest" || s === "yday") return addDays(today, -1);
+  let m = s.match(/^([+-])(\d{1,3})([dw]?)$/);
+  if (m) {
+    const n = Number(m[2]) * (m[3] === "w" ? 7 : 1);
+    return addDays(today, m[1] === "+" ? n : -n);
+  }
+  m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+  if (m) return valid(Number(m[1]), Number(m[2]), Number(m[3]));
+  m = s.match(/^(\d{1,2})[/.](\d{1,2})(?:[/.](\d{2,4}))?$/);
+  if (m) {
+    const t = fromISODate(today);
+    let y = m[3] ? Number(m[3]) : t.getFullYear();
+    if (y < 100) y += 2e3;
+    return valid(y, Number(m[2]), Number(m[1]));
+  }
+  m = s.match(/^(last |next )?([a-z]{3,9})$/);
+  if (m && isDayName(m[2])) {
+    const idx = weekdayIndex(m[2]);
+    const cur = fromISODate(today).getDay();
+    if (m[1] === "last ") return addDays(today, -((cur - idx + 7) % 7 || 7));
+    return addDays(today, (idx - cur + 7) % 7 || 7);
+  }
+  return null;
+}
+var DAY_NAMES = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
+function isDayName(w) {
+  return DAY_NAMES.some((d) => d.startsWith(w) && w.length >= 3);
+}
+function valid(y, m, d) {
+  const dt = new Date(y, m - 1, d);
+  if (dt.getFullYear() !== y || dt.getMonth() !== m - 1 || dt.getDate() !== d) return null;
+  return toISODate(dt);
+}
 function minutesBetween(from, to) {
   return Math.round((fromISODateTime(to).getTime() - fromISODateTime(from).getTime()) / 6e4);
 }
@@ -3208,9 +3254,120 @@ function formatDuration(min) {
   return `${sign}${Math.floor(a / 60)}h${pad(a % 60)}`;
 }
 
+// src/shared/recur.ts
+function isValidRecur(rule) {
+  return nextOccurrence(rule, "2026-01-01") !== null;
+}
+function nextOccurrence(rule, after) {
+  const r = rule.trim().toLowerCase();
+  if (r === "day" || r === "daily") return addDays(after, 1);
+  if (r === "week" || r === "weekly") return addDays(after, 7);
+  if (r === "weekday" || r === "weekdays") {
+    let d = addDays(after, 1);
+    while ([0, 6].includes(fromISODate(d).getDay())) d = addDays(d, 1);
+    return d;
+  }
+  const mm = r.match(/^month(?:ly)?(?::(\d{1,2}))?$/);
+  if (mm) {
+    const a = fromISODate(after);
+    const dom = mm[1] ? Number(mm[1]) : a.getDate();
+    if (dom < 1 || dom > 31) return null;
+    for (let i = 0; i < 2; i++) {
+      const y = a.getFullYear();
+      const m = a.getMonth() + i;
+      const last = new Date(y, m + 1, 0).getDate();
+      const cand = toISODate(new Date(y, m, Math.min(dom, last)));
+      if (cand > after) return cand;
+    }
+    return null;
+  }
+  const days = r.split(/[,\s]+/).filter(Boolean).map(weekdayIndex);
+  if (days.length && days.every((i) => i >= 0)) {
+    let d = addDays(after, 1);
+    for (let i = 0; i < 7; i++) {
+      if (days.includes(fromISODate(d).getDay())) return d;
+      d = addDays(d, 1);
+    }
+  }
+  return null;
+}
+
+// src/shared/parse.ts
+var JIRA_KEY = /^[A-Z][A-Z0-9]+-\d+$/;
+function normalizeLabel(raw2, aliases) {
+  const l = raw2.replace(/^#/, "").trim().toLowerCase();
+  const i = l.indexOf(":");
+  if (i > 0) {
+    const type = l.slice(0, i);
+    return `${aliases[type] ?? type}:${l.slice(i + 1)}`;
+  }
+  return l;
+}
+function parseCapture(line, today, aliases = {}) {
+  const out = {
+    title: "",
+    labels: [],
+    source: null,
+    ref: "",
+    due: null,
+    snooze_until: null,
+    today: false,
+    recur: null,
+    errors: []
+  };
+  const words = [];
+  for (const tok of line.trim().split(/\s+/).filter(Boolean)) {
+    if (tok.length > 1 && tok.startsWith("#")) {
+      const l = normalizeLabel(tok, aliases);
+      if (!out.labels.includes(l)) out.labels.push(l);
+    } else if (tok.length > 1 && tok.startsWith("@")) {
+      out.source = tok.slice(1).toLowerCase();
+    } else if (tok.length > 1 && (tok.startsWith("^") || tok.startsWith("~"))) {
+      const d = parseDate(tok.slice(1), today);
+      if (!d) {
+        out.errors.push(`Unknown date "${tok.slice(1)}"`);
+        words.push(tok);
+      } else if (tok.startsWith("^")) out.due = d;
+      else out.snooze_until = d;
+    } else if (tok === "*") {
+      out.today = true;
+    } else if (tok.toLowerCase().startsWith("every:")) {
+      const rule = tok.slice(6).toLowerCase();
+      if (isValidRecur(rule)) out.recur = rule;
+      else {
+        out.errors.push(`Unknown repeat rule "${rule}"`);
+        words.push(tok);
+      }
+    } else if (JIRA_KEY.test(tok) && !out.ref) {
+      out.ref = tok;
+      if (!out.source) out.source = "jira";
+      words.push(tok);
+    } else if (/^https?:\/\//i.test(tok) && !out.ref) {
+      out.ref = tok;
+    } else {
+      words.push(tok);
+    }
+  }
+  out.title = words.join(" ");
+  return out;
+}
+function captureToTask(c, today) {
+  return {
+    title: c.title,
+    labels: c.labels,
+    source: c.source ?? "me",
+    ref: c.ref,
+    due: c.due,
+    snooze_until: c.snooze_until,
+    today: c.today ? today : null,
+    recur: c.recur
+  };
+}
+
 // src/shared/types.ts
 var DEFAULT_SETTINGS = {
   archive_after_days: 30,
+  waiting_nudge_days: 3,
   backups_keep: 14,
   jira_url: "",
   label_aliases: { p: "project", m: "module", r: "req" }
@@ -3273,6 +3430,9 @@ function isOnToday(t, today) {
   if (t.done || isSnoozed(t, today)) return false;
   return !!t.today && t.today <= today || !!t.due && t.due <= today;
 }
+function minOrder(tasks, key) {
+  return tasks.reduce((m, t) => Math.min(m, t[key]), 0) - 1;
+}
 function archiveCandidates(doc2, today) {
   const cutoff = addDays(today, -doc2.settings.archive_after_days);
   return doc2.tasks.filter((t) => t.done && t.done < cutoff);
@@ -3280,17 +3440,32 @@ function archiveCandidates(doc2, today) {
 function correctionMinutes(c) {
   return minutesBetween(c.from, c.to);
 }
+function addFromLine(doc2, line, today, now, attachments = []) {
+  const c = parseCapture(line, today, doc2.settings.label_aliases);
+  const t = newTask({ ...captureToTask(c, today), attachments }, now);
+  t.order = minOrder(doc2.tasks, "order");
+  t.today_order = doc2.tasks.reduce((m, x) => Math.max(m, x.today_order), 0) + 1;
+  doc2.tasks.push(t);
+  return t;
+}
+function staleWaiting(doc2, today) {
+  return doc2.tasks.filter((t) => !t.done && t.waiting && waitingDays(t, today) >= doc2.settings.waiting_nudge_days).sort((a, b) => waitingDays(b, today) - waitingDays(a, today));
+}
 function summarize(doc2, today) {
   const open = doc2.tasks.filter((t) => !t.done);
   const pending = doc2.time_corrections.filter((c) => !c.submitted);
   return {
     today: open.filter((t) => isOnToday(t, today)).length,
     waiting: open.filter((t) => t.waiting).length,
+    followUps: staleWaiting(doc2, today).map((t) => ({ on: t.waiting.on, title: t.title, days: waitingDays(t, today) })),
     overdue: open.filter((t) => t.due && t.due < today).length,
     dueTomorrow: open.filter((t) => t.due === addDays(today, 1)).length,
     pendingCorrections: pending.length,
     pendingMinutes: pending.reduce((s, c) => s + correctionMinutes(c), 0)
   };
+}
+function waitingDays(t, today) {
+  return t.waiting ? diffDays(today, t.waiting.since) : 0;
 }
 
 // src/server/storage.ts
@@ -3364,6 +3539,16 @@ function saveDoc(next) {
     return doc;
   });
 }
+function mutateDoc(fn) {
+  return serial(async () => {
+    const next = structuredClone(doc);
+    const result = fn(next);
+    next.rev = doc.rev + 1;
+    await writeAtomic(TASKS, next);
+    doc = next;
+    return { doc, result };
+  });
+}
 function archiveOld(rev) {
   return serial(async () => {
     if (rev !== doc.rev) throw new Conflict(doc);
@@ -3427,6 +3612,13 @@ app.onError((err, c) => {
 app.get("/api/ping", (c) => c.json({ ok: true, app: "tasktui" }));
 app.get("/api/data", (c) => c.json({ doc: getDoc(), archive: getArchive().tasks, dataDir: DATA_DIR }));
 app.put("/api/data", async (c) => c.json({ doc: await saveDoc(await c.req.json()) }));
+app.post("/api/capture", async (c) => {
+  const { line, attachments = [] } = await c.req.json();
+  if (!line?.trim()) return c.json({ error: "empty" }, 400);
+  const now = /* @__PURE__ */ new Date();
+  const { doc: doc2, result } = await mutateDoc((d) => addFromLine(d, line, toISODate(now), toISODateTime(now), attachments));
+  return c.json({ task: result, rev: doc2.rev });
+});
 app.post("/api/archive", async (c) => {
   const { rev } = await c.req.json();
   const { doc: doc2, moved } = await archiveOld(rev);
@@ -3456,6 +3648,7 @@ app.get("/api/summary", (c) => {
   const parts = [`${s.today} for today`];
   if (s.overdue) parts.push(`${s.overdue} overdue`);
   if (s.waiting) parts.push(`${s.waiting} waiting`);
+  if (s.followUps.length) parts.push(`follow up: ${s.followUps.map((f) => `${f.on} (${f.days}d)`).join(", ")}`);
   if (s.dueTomorrow) parts.push(`${s.dueTomorrow} due tomorrow`);
   if (s.pendingCorrections) parts.push(`${formatDuration(s.pendingMinutes)} of time corrections not submitted`);
   return c.json({ ...s, text: parts.join(" - ") });

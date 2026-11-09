@@ -24,7 +24,7 @@ function mondayOfWeekKey(key: string): string {
 }
 
 const HINTS: Record<Tab, string[]> = {
-  tasks: ['a add', '⏎ done', 'e edit', '* today', 'w wait', 's snooze', 'o open', 'g group', '/ search', '? help'],
+  tasks: ['a add', '⏎ done', 'c standup', 'e edit', '* today', 'w wait', 's snooze', 'o open', 'g group', '/ search', '? help'],
   week: ['h/l week', '⏎ edit', 'e week note', 't time', 'space entered', 'c copy', 'g group', '? help'],
 };
 

@@ -1,9 +1,9 @@
 // Pure task logic used by the client (and tests).
 import { addDays, diffDays, minutesBetween } from './dates';
-import { labelParts } from './parse';
+import { captureToTask, labelParts, parseCapture } from './parse';
 import { nextOccurrence } from './recur';
-import type { Doc, Task, TimeCorrection } from './types';
-import { newId } from './types';
+import type { Attachment, Doc, Task, TimeCorrection } from './types';
+import { newId, newTask } from './types';
 
 export type ViewId =
   | { kind: 'today' }
@@ -116,9 +116,61 @@ export function correctionMinutes(c: TimeCorrection): number {
   return minutesBetween(c.from, c.to);
 }
 
+/** Add a task from a quick-capture line, at the top of the list. Mutates `doc`. */
+export function addFromLine(doc: Doc, line: string, today: string, now: string, attachments: Attachment[] = []): Task {
+  const c = parseCapture(line, today, doc.settings.label_aliases);
+  const t = newTask({ ...captureToTask(c, today), attachments }, now);
+  t.order = minOrder(doc.tasks, 'order');
+  t.today_order = doc.tasks.reduce((m, x) => Math.max(m, x.today_order), 0) + 1;
+  doc.tasks.push(t);
+  return t;
+}
+
+/** Open tasks waiting for at least `waiting_nudge_days`, longest first. */
+export function staleWaiting(doc: Doc, today: string): Task[] {
+  return doc.tasks
+    .filter((t) => !t.done && t.waiting && waitingDays(t, today) >= doc.settings.waiting_nudge_days)
+    .sort((a, b) => waitingDays(b, today) - waitingDays(a, today));
+}
+
+export function isStale(t: Task, doc: Doc, today: string): boolean {
+  return !t.done && !!t.waiting && waitingDays(t, today) >= doc.settings.waiting_nudge_days;
+}
+
+/** The working day before `today` (Monday → Friday). */
+export function previousWorkday(today: string): string {
+  let d = addDays(today, -1);
+  while ([0, 6].includes(new Date(d + 'T12:00').getDay())) d = addDays(d, -1);
+  return d;
+}
+
+export interface Standup {
+  since: string; // previous working day
+  yesterday: Task[];
+  today: Task[];
+  blocked: Task[];
+}
+
+/** Data for "Yesterday / Today / Blocked". `archive` is searched for yesterday's done tasks too. */
+export function standup(doc: Doc, archive: Task[], today: string): Standup {
+  const since = previousWorkday(today);
+  // Everything finished after the previous standup: the last workday plus any weekend work.
+  const yesterday = [...doc.tasks, ...archive].filter((t) => t.done && t.done >= since && t.done < today);
+  const todayList = sortTasks(
+    doc.tasks.filter((t) => isOnToday(t, today) && !t.waiting),
+    'manual',
+    { kind: 'today' },
+  );
+  const blocked = doc.tasks
+    .filter((t) => !t.done && t.waiting)
+    .sort((a, b) => waitingDays(b, today) - waitingDays(a, today));
+  return { since, yesterday, today: todayList, blocked };
+}
+
 export interface Summary {
   today: number;
   waiting: number;
+  followUps: { on: string; title: string; days: number }[];
   overdue: number;
   dueTomorrow: number;
   pendingCorrections: number;
@@ -131,6 +183,7 @@ export function summarize(doc: Doc, today: string): Summary {
   return {
     today: open.filter((t) => isOnToday(t, today)).length,
     waiting: open.filter((t) => t.waiting).length,
+    followUps: staleWaiting(doc, today).map((t) => ({ on: t.waiting!.on, title: t.title, days: waitingDays(t, today) })),
     overdue: open.filter((t) => t.due && t.due < today).length,
     dueTomorrow: open.filter((t) => t.due === addDays(today, 1)).length,
     pendingCorrections: pending.length,

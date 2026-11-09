@@ -179,6 +179,46 @@ await page.waitForSelector('.result');
 check((await page.$$('.result')).length === 1, 'search filters by label and status');
 await key('Escape');
 
+// Quick capture window: adds on the server, the main window picks it up on focus.
+const cap = await browser.newPage({ viewport: { width: 720, height: 210 }, colorScheme: 'dark' });
+cap.on('pageerror', (e) => errors.push(e.message));
+await cap.goto(`http://localhost:${PORT}/capture`);
+await cap.waitForSelector('.capture-app input');
+await cap.keyboard.type('Reply to Teams thread #proj');
+await cap.keyboard.press('Tab');
+await cap.keyboard.type('@teams *');
+await cap.keyboard.press('Shift+Enter');
+await cap.waitForTimeout(400);
+let captured = json().tasks.find((t) => t.title === 'Reply to Teams thread');
+check(captured?.source === 'teams' && captured.labels[0] === 'project:apollo' && captured.today, 'capture window adds a task (autocomplete, source, today)');
+await cap.screenshot({ path: join(shots, '5-capture.png') });
+await cap.close();
+await page.bringToFront();
+await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+await page.waitForTimeout(500);
+await key('1');
+check((await page.$$eval('.task .title', (els) => els.map((e) => e.textContent))).includes('Reply to Teams thread'), 'main window picks up the captured task');
+
+// Follow-up nudge: make the waiting task 5 days old (as if set earlier), then refresh.
+const res = await (await fetch(`http://localhost:${PORT}/api/data`)).json();
+res.doc.tasks.find((t) => t.waiting).waiting.since = iso(new Date(Date.now() - 5 * 86400000));
+await fetch(`http://localhost:${PORT}/api/data`, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify(res.doc) });
+await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+await page.waitForTimeout(500);
+check((await page.$$('.waiting.stale')).length === 1, 'waiting 5 days shows the follow-up badge');
+const summary = await (await fetch(`http://localhost:${PORT}/api/summary`)).json();
+check(summary.text.includes('follow up: Marc (5d)'), `reminder text has follow-ups: "${summary.text}"`);
+
+// Standup
+await key('Escape', 'c');
+await page.waitForSelector('.standup');
+const stand = await page.$eval('.standup', (e) => e.textContent);
+check(stand.includes('Yesterday') || stand.includes('Since'), 'standup has the previous day');
+check(stand.includes('Today') && stand.includes('Reply to Teams thread'), 'standup lists Today');
+check(stand.includes('waiting on Marc for 5 days'), 'standup lists blocked tasks');
+await page.screenshot({ path: join(shots, '6-standup.png') });
+await key('Escape');
+
 await key('?');
 await page.screenshot({ path: join(shots, '4-help.png') });
 await key('Escape');

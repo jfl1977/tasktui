@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react';
+import { useLayoutEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import { relDay } from '../../shared/dates';
 import { parseCapture } from '../../shared/parse';
 import { useStore } from '../store';
@@ -28,6 +28,21 @@ export function useLabelComplete(value: string, cursor: number) {
   return { word: m[1], items };
 }
 
+/**
+ * Place the cursor right after React writes the new value (before the next keystroke), so fast
+ * typing after a Tab completion lands in the right place.
+ */
+export function useCursorAfterRender(ref: RefObject<HTMLInputElement | null>) {
+  const pending = useRef<number | null>(null);
+  useLayoutEffect(() => {
+    if (pending.current !== null && ref.current) {
+      ref.current.setSelectionRange(pending.current, pending.current);
+      pending.current = null;
+    }
+  });
+  return (pos: number) => (pending.current = pos);
+}
+
 export function applyCompletion(value: string, cursor: number, word: string, label: string): [string, number] {
   const start = cursor - word.length;
   const next = value.slice(0, start) + label + ' ' + value.slice(cursor);
@@ -40,6 +55,7 @@ export function QuickAdd({ onAdd, onClose }: { onAdd: (line: string) => void; on
   const [cursor, setCursor] = useState(0);
   const [sel, setSel] = useState(0);
   const input = useRef<HTMLInputElement>(null);
+  const placeCursor = useCursorAfterRender(input);
   const c = parseCapture(v, today, doc.settings.label_aliases);
   const { word, items } = useLabelComplete(v, cursor);
 
@@ -48,7 +64,7 @@ export function QuickAdd({ onAdd, onClose }: { onAdd: (line: string) => void; on
     setV(next);
     setCursor(pos);
     setSel(0);
-    requestAnimationFrame(() => input.current?.setSelectionRange(pos, pos));
+    placeCursor(pos);
   }
 
   return (

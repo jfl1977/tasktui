@@ -26,7 +26,7 @@ Keep this document up to date when behaviour changes. It is the reference for fu
 | `due` | date \| null | |
 | `snooze_until` | date \| null | hidden from lists until that date |
 | `today` | date \| null | pinned to Today on that date; stays on Today until done or unpinned |
-| `waiting` | `{on, since}` \| null | blocked on someone/something |
+| `waiting` | `{on, since}` \| null | blocked on someone/something; after `waiting_nudge_days` (default 3) it needs a follow-up |
 | `recur` | string \| null | repeat rule, see 1.3 |
 | `done` | date \| null | the day it was finished (can be in the past) |
 | `order` | number | manual order in normal lists |
@@ -95,6 +95,9 @@ The Today list has its own order.
 Adding a task (`a`) from a label, source or Today view pre-fills that label, source or pin.
 New tasks go to the top of the list.
 
+Follow-ups: a task waiting for `waiting_nudge_days` or more shows `⚠ Marc 5d` in red, the
+Waiting entry shows `⚠n`, the details say "time to follow up", and the reminder toast lists them.
+
 ### 2.2 Week view
 
 Mon–Sun of one week: the week note, then one block per day (day note + tasks done that day,
@@ -106,7 +109,16 @@ Copy (`c`) puts the week on the clipboard as HTML (images inlined as data URIs, 
 Outlook/Teams) and as Markdown text. Export (`x`) downloads `week-2026-W45.md`. Days without
 notes or tasks are left out of the copy.
 
-### 2.3 Dialogs
+### 2.3 Capture window (`/capture`)
+
+A small separate window, opened from anywhere by its own hotkey (default Ctrl+Alt+N):
+one quick-capture line with label autocomplete and preview chips. ⏎ adds and closes,
+Shift+⏎ adds and stays open, Ctrl+V or drop attaches screenshots/files to the new task, Esc closes.
+The server adds the task (`POST /api/capture`). Open main windows pick it up when they get focus
+(they also check every 15 s while idle), so the two windows never overwrite each other.
+Picking up outside changes clears the undo history (old snapshots would undo them).
+
+### 2.4 Dialogs
 
 | Dialog | Behaviour |
 |---|---|
@@ -119,7 +131,8 @@ notes or tasks are left out of the copy.
 | Note editor | Markdown with live preview (Ctrl+P toggles). Esc / Ctrl+⏎ / Ctrl+S save and close |
 | Time correction | From, To, Reason, Task. `today 9-11:30` in From fills both. A bare time means the selected day. "To" without a date uses From's date |
 | Search | see 5 |
-| Settings (`,`) | Jira URL, archive after N days, backups to keep, label aliases, shows the data folder |
+| Standup (`c` in Tasks) | preview of **Yesterday** (tasks done since the previous working day, before today; Monday covers Friday and the weekend; archive included) · **Today** (Today list minus waiting tasks, in Today order) · **Blocked / waiting** (all waiting tasks, longest first). ⏎ or `c` copies as HTML + Markdown |
+| Settings (`,`) | Jira URL, archive after N days, follow-up after N days, backups to keep, label aliases, shows the data folder |
 | Help (`?`) | all shortcuts |
 
 ---
@@ -174,6 +187,7 @@ Invalid dates/rules are reported and left in the title so nothing typed is lost.
 | `j`/`k`, ↓/↑, Home/End, PgUp/PgDn | move |
 | Tab | switch sidebar / list |
 | `a` | quick capture |
+| `c` | standup (copy for Teams) |
 | ⏎ | done dialog (⏎ ⏎ = done today) |
 | `e` / double-click | edit |
 | `*` | pin / unpin today |
@@ -258,6 +272,7 @@ tasktui-data/
   "rev": 42,
   "settings": {
     "archive_after_days": 30,
+    "waiting_nudge_days": 3,
     "backups_keep": 14,
     "jira_url": "https://yourcompany.atlassian.net/browse/",
     "label_aliases": { "p": "project", "m": "module", "r": "req" }
@@ -290,12 +305,13 @@ Listens on `127.0.0.1:${TASKTUI_PORT:-8765}` only.
 |---|---|---|
 | GET | `/api/ping` | `{ok, app:"tasktui"}` (used by the launcher) |
 | GET | `/api/data` | `{doc, archive, dataDir}` |
+| POST | `/api/capture` | `{line, attachments?}` → server adds the task → `{task, rev}` |
 | PUT | `/api/data` | save the whole doc; body `rev` must match; returns `{doc}` with new `rev`, or 409 `{doc}` |
 | POST | `/api/archive` | `{rev}` → `{doc, archive, moved}` |
 | POST | `/api/attachments?name=x.png` | raw body → `{file, name, added}` |
 | GET | `/attachments/:file` | file content (no path traversal) |
 | POST | `/api/open` | `{file}` opens it with the OS default app |
-| GET | `/api/summary` | counts + `text` for the reminder toast |
+| GET | `/api/summary` | counts, `followUps` + `text` for the reminder toast |
 | GET | `/*` | built client (`dist/public`) |
 
 ---
@@ -304,17 +320,29 @@ Listens on `127.0.0.1:${TASKTUI_PORT:-8765}` only.
 
 `scripts/` (ASCII-only, because Windows PowerShell 5.1 misreads UTF-8 without a BOM):
 
+- `tasktui.ps1 -Capture`: same, but opens the small capture window (720×210).
 - `tasktui.ps1`: starts `node dist/server.js` hidden if `/api/ping` doesn't answer (log in
   `%TEMP%\tasktui.log`), then opens `msedge --app=http://localhost:8765` (falls back to the
   default browser). `-NoOpen` only starts, `-Stop` stops.
 - `reminder.ps1`: starts the server if needed, reads `/api/summary`, shows a toast
-  ("3 for today - 2 waiting - 2h30 of time corrections not submitted"). Clicking opens the app
+  ("3 for today - 2 waiting - follow up: Marc (5d) - 2h30 of time corrections not submitted"). Clicking opens the app
   in the default browser.
-- `install-windows.ps1`: Start menu shortcut with hotkey (default Ctrl+Alt+T) and a scheduled
-  task with weekday triggers at 08:30 and 15:30 (`-Hotkey`, `-Times`, `-Uninstall`).
+- `install-windows.ps1`: Start menu shortcuts with hotkeys (app: Ctrl+Alt+T, capture: Ctrl+Alt+N) and a scheduled
+  task with weekday triggers at 08:30 and 15:30 (`-Hotkey`, `-CaptureHotkey`, `-Times`, `-Uninstall`).
   Current user, no admin.
 
 ---
+
+Linux: `scripts/tasktui.sh` does the same as `tasktui.ps1` (`--capture`, `--no-open`, `--stop`),
+log in `~/.cache/tasktui.log`, windows opened with `omarchy-launch-webapp` (or `chromium --app`).
+On Omarchy/Hyprland, bind it in `~/.config/hypr/bindings.lua` and float the capture window:
+
+```lua
+o.bind("SUPER + ALT + T", "Tasks", "~/Projects/tasktui/scripts/tasktui.sh")
+o.bind("SUPER + ALT + N", "Quick task", "~/Projects/tasktui/scripts/tasktui.sh --capture")
+-- in hyprland.lua:
+o.window("chrome-localhost__capture-Default", { float = true, center = true, size = { 720, 220 } })
+```
 
 ## 10. Code layout
 

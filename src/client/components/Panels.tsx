@@ -35,6 +35,7 @@ export function Help({ onClose }: { onClose: () => void }) {
           <table>
             <tbody>
               {row(['a'], 'Add (quick capture)')}
+              {row(['c'], 'Standup: yesterday / today / blocked, to copy')}
               {row(['⏎', '⏎'], 'Mark done today (⏎ then ←/→ for another day)')}
               {row(['e'], 'Edit')}
               {row(['*'], 'Pin to / unpin from Today')}
@@ -101,6 +102,7 @@ export function Settings({ onClose }: { onClose: () => void }) {
   const [jira, setJira] = useState(s.jira_url);
   const [archiveDays, setArchiveDays] = useState(String(s.archive_after_days));
   const [keep, setKeep] = useState(String(s.backups_keep));
+  const [nudge, setNudge] = useState(String(s.waiting_nudge_days));
   const [aliases, setAliases] = useState(
     Object.entries(s.label_aliases)
       .map(([a, b]) => `${a}=${b}`)
@@ -112,6 +114,7 @@ export function Settings({ onClose }: { onClose: () => void }) {
       jira_url: jira.trim(),
       archive_after_days: Math.max(1, Number(archiveDays) || 30),
       backups_keep: Math.max(1, Number(keep) || 14),
+      waiting_nudge_days: Math.max(1, Number(nudge) || 3),
       label_aliases: Object.fromEntries(
         aliases
           .split(/[,\n]/)
@@ -137,6 +140,10 @@ export function Settings({ onClose }: { onClose: () => void }) {
         <label className="field">
           <span>Archive after (days)</span>
           <input value={archiveDays} onChange={(e) => setArchiveDays(e.target.value)} />
+        </label>
+        <label className="field">
+          <span>Follow up after waiting (days)</span>
+          <input value={nudge} onChange={(e) => setNudge(e.target.value)} />
         </label>
         <label className="field">
           <span>Backups to keep</span>

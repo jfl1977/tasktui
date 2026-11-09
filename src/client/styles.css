@@ -707,6 +707,50 @@ main {
   background: #fff;
 }
 
+/* ── Capture window ─────────────────────── */
+.capture-app {
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-height: 100%;
+}
+.capture-thumb {
+  height: 42px;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+}
+.capture-foot {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: auto;
+  font-size: 0.9em;
+}
+.chip.error {
+  color: var(--bad);
+}
+.waiting.stale {
+  color: var(--bad);
+  font-weight: bold;
+}
+.side-item .alert {
+  color: var(--bad);
+  margin-left: 4px;
+}
+.standup {
+  outline: none;
+}
+.standup h3 {
+  color: var(--accent2);
+  font-size: 1em;
+  margin: 8px 0 2px;
+}
+.standup ul {
+  margin: 0;
+  padding-left: 1.4em;
+}
+
 @media (max-width: 900px) {
   .tasks-view {
     grid-template-columns: 170px minmax(0, 1fr);

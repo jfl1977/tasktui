@@ -143,6 +143,33 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     undoStack.current = [];
   }, []);
 
+  // Pick up changes made elsewhere (the quick-capture window, another window) when this window
+  // gets focus, and every 15 s. Skipped while local changes are being saved.
+  useEffect(() => {
+    const refresh = async () => {
+      if (dirty.current || savingRef.current || !docRef.current) return;
+      try {
+        const r = await api.load();
+        if (dirty.current || savingRef.current || !docRef.current || r.doc.rev === docRef.current.rev) return;
+        const before = docRef.current.tasks.length;
+        docRef.current = r.doc;
+        setDoc(r.doc);
+        setArchive(r.archive);
+        undoStack.current = []; // older snapshots would undo the other window's changes
+        const added = r.doc.tasks.length - before;
+        notify(added > 0 ? `${added} new task(s) from quick capture` : 'Updated with changes from another window');
+      } catch {
+        /* server briefly unreachable: try again later */
+      }
+    };
+    window.addEventListener('focus', refresh);
+    const i = setInterval(refresh, 15_000);
+    return () => {
+      window.removeEventListener('focus', refresh);
+      clearInterval(i);
+    };
+  }, [notify]);
+
   // Warn before closing the window with unsaved changes.
   useEffect(() => {
     const h = (e: BeforeUnloadEvent) => {

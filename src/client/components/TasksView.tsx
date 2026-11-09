@@ -4,6 +4,8 @@ import {
   groupValue,
   isOnToday,
   isSnoozed,
+  isStale,
+  staleWaiting,
   labelTypes,
   matchesView,
   sortTasks,
@@ -20,11 +22,13 @@ import { useUI } from '../ui';
 import { clamp, keyName, renderMarkdown, useKeys } from '../util';
 import { AttachmentList, openAttachment } from './Attachments';
 import { uploadAll } from './MarkdownEditor';
+import { StandupDialog } from './StandupDialog';
 
 interface Entry {
   key: string;
   text: string;
   count?: number;
+  alert?: string; // e.g. follow-ups due
   header?: boolean;
   view?: ViewId;
   label?: string; // label entries can be multi-selected
@@ -51,7 +55,7 @@ function persist(k: string, v: unknown) {
 
 export function TasksView({ active, jump }: { active: boolean; jump: { id: string; n: number } | null }) {
   const { doc, today, notify } = useStore();
-  const { modalOpen, editing } = useUI();
+  const { modalOpen, editing, openModal } = useUI();
   const act = useTaskActions();
   const [entryKey, setEntryKey] = useState<string>(() => load('entry', 'inbox'));
   const [checked, setChecked] = useState<string[]>(() => load('checked', []));
@@ -76,7 +80,13 @@ export function TasksView({ active, jump }: { active: boolean; jump: { id: strin
     const e: Entry[] = [
       { key: 'today', text: '★ Today', view: { kind: 'today' }, count: n({ kind: 'today' }) },
       { key: 'inbox', text: '▢ Inbox', view: { kind: 'inbox' }, count: n({ kind: 'inbox' }) },
-      { key: 'waiting', text: '⏳ Waiting', view: { kind: 'waiting' }, count: n({ kind: 'waiting' }) },
+      {
+        key: 'waiting',
+        text: '⏳ Waiting',
+        view: { kind: 'waiting' },
+        count: n({ kind: 'waiting' }),
+        alert: staleWaiting(doc, today).length ? `⚠${staleWaiting(doc, today).length}` : undefined,
+      },
       { key: 'snoozed', text: '💤 Snoozed', view: { kind: 'snoozed' }, count: n({ kind: 'snoozed' }) },
       { key: 'done', text: '✓ Done', view: { kind: 'done' } },
       { key: 'all', text: '∗ Everything', view: { kind: 'all' } },
@@ -104,7 +114,8 @@ export function TasksView({ active, jump }: { active: boolean; jump: { id: strin
         e.push({ key: 's:' + s, text: '@' + s, count: c, view: { kind: 'source', source: s } });
     }
     return e;
-  }, [doc.tasks, today]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [doc.tasks, doc.settings.waiting_nudge_days, today]);
 
   const view: ViewId = checked.length
     ? { kind: 'labels', labels: checked }
@@ -234,6 +245,7 @@ export function TasksView({ active, jump }: { active: boolean; jump: { id: strin
     }
 
     if (k === 'a') return handled(), flows.quickAdd(suffix(), (id) => setSelId(id));
+    if (k === 'c') return handled(), openModal((close) => <StandupDialog onClose={close} />);
     if (k === 'g') {
       handled();
       const next = groupOptions[(groupOptions.indexOf(groupBy) + 1) % groupOptions.length];
@@ -313,6 +325,7 @@ export function TasksView({ active, jump }: { active: boolean; jump: { id: strin
             >
               {e.label && checked.length > 0 && <span className="check">{on ? '☑' : '☐'} </span>}
               <span className="side-text">{e.text}</span>
+              {e.alert && <span className="alert" title="waiting long enough to follow up">{e.alert}</span>}
               {e.count !== undefined && <span className="count">{e.count}</span>}
             </div>
           );
@@ -397,7 +410,9 @@ function TaskRow({
   onDropRow: (files: File[]) => void;
 }) {
   const [over, setOver] = useState(false);
+  const { doc } = useStore();
   const overdue = !t.done && t.due && t.due < today;
+  const stale = isStale(t, doc, today);
   return (
     <div
       className={`task ${selected ? 'sel' : ''} ${t.done ? 'is-done' : ''} ${dragging ? 'dragging' : ''} ${over ? 'drop' : ''}`}
@@ -431,7 +446,12 @@ function TaskRow({
         );
       })}
       <span className="meta">
-        {t.waiting && <span className="waiting">{t.waiting.on} {waitingDays(t, today)}d</span>}
+        {t.waiting && (
+          <span className={`waiting ${stale ? 'stale' : ''}`} title={stale ? 'Time to follow up' : undefined}>
+            {stale && '⚠ '}
+            {t.waiting.on} {waitingDays(t, today)}d
+          </span>
+        )}
         {t.ref && <span className="ref">{t.ref.length > 24 ? t.ref.slice(0, 22) + '…' : t.ref}</span>}
         {t.source !== 'me' && !(t.source === 'jira' && /^[A-Z]/.test(t.ref)) && <span className="source">@{t.source}</span>}
         {t.recur && <span title={`repeats ${t.recur}`}>↻</span>}
@@ -475,6 +495,7 @@ export function TaskDetails({ task: t }: { task: Task }) {
             <dt>waiting</dt>
             <dd>
               on {t.waiting.on} since {prettyDay(t.waiting.since)} ({diffDays(today, t.waiting.since)}d)
+              {isStale(t, doc, today) && <span className="overdue"> · time to follow up</span>}
             </dd>
           </>
         )}

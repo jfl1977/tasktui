@@ -83,6 +83,18 @@ export function saveDoc(next: Doc): Promise<Doc> {
   });
 }
 
+/** Apply a change on the server side (used by quick capture from the capture window). */
+export function mutateDoc<T>(fn: (d: Doc) => T): Promise<{ doc: Doc; result: T }> {
+  return serial(async () => {
+    const next = structuredClone(doc);
+    const result = fn(next);
+    next.rev = doc.rev + 1;
+    await writeAtomic(TASKS, next);
+    doc = next;
+    return { doc, result };
+  });
+}
+
 /** Move tasks done more than `archive_after_days` ago into archive.json. */
 export function archiveOld(rev: number): Promise<{ doc: Doc; moved: number }> {
   return serial(async () => {

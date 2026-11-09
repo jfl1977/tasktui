@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { formatDuration, isoWeek, minutesBetween, mondayOf, parseDate, parseDateTime, parseRange, weekKey } from '../src/shared/dates';
-import { completeTask, isOnToday, matchesView, summarize } from '../src/shared/logic';
+import { addFromLine, completeTask, isOnToday, matchesView, previousWorkday, staleWaiting, standup, summarize } from '../src/shared/logic';
 import { normalizeLabel, parseCapture } from '../src/shared/parse';
 import { nextOccurrence } from '../src/shared/recur';
 import { emptyDoc, newTask } from '../src/shared/types';
@@ -127,5 +127,39 @@ describe('task logic', () => {
     doc.tasks.push(newTask({ today: TODAY }, ''), newTask({ waiting: { on: 'Marc', since: TODAY } }, ''));
     doc.time_corrections.push({ id: 'c', from: '2026-11-03T09:00', to: '2026-11-03T11:30', reason: '', task: null, submitted: false });
     expect(summarize(doc, TODAY)).toMatchObject({ today: 1, waiting: 1, pendingCorrections: 1, pendingMinutes: 150 });
+  });
+
+  it('addFromLine puts new tasks on top', () => {
+    const doc = emptyDoc();
+    const a = addFromLine(doc, 'First #x', TODAY, '2026-11-08T09:00');
+    const b = addFromLine(doc, 'Second ^tomorrow', TODAY, '2026-11-08T09:01');
+    expect(b.order).toBeLessThan(a.order);
+    expect(b.due).toBe('2026-11-09');
+    expect(a.labels).toEqual(['x']);
+  });
+  it('flags waiting tasks that need a follow-up', () => {
+    const doc = emptyDoc();
+    doc.tasks.push(
+      newTask({ title: 'old', waiting: { on: 'Marc', since: '2026-11-03' } }, ''),
+      newTask({ title: 'new', waiting: { on: 'Ops', since: '2026-11-07' } }, ''),
+    );
+    expect(staleWaiting(doc, TODAY).map((t) => t.title)).toEqual(['old']);
+    expect(summarize(doc, TODAY).followUps).toEqual([{ on: 'Marc', title: 'old', days: 5 }]);
+  });
+  it('standup covers the previous workday (and the weekend) until today', () => {
+    expect(previousWorkday('2026-11-09')).toBe('2026-11-06'); // Monday → Friday
+    expect(previousWorkday('2026-11-11')).toBe('2026-11-10');
+    const doc = emptyDoc();
+    doc.tasks.push(
+      newTask({ title: 'fri', done: '2026-11-06' }, ''),
+      newTask({ title: 'sat', done: '2026-11-07' }, ''),
+      newTask({ title: 'thu', done: '2026-11-05' }, ''),
+      newTask({ title: 'pinned', today: '2026-11-09' }, ''),
+      newTask({ title: 'blocked', today: '2026-11-09', waiting: { on: 'Marc', since: '2026-11-02' } }, ''),
+    );
+    const s = standup(doc, [newTask({ title: 'archived fri', done: '2026-11-06' }, '')], '2026-11-09');
+    expect(s.yesterday.map((t) => t.title).sort()).toEqual(['archived fri', 'fri', 'sat']);
+    expect(s.today.map((t) => t.title)).toEqual(['pinned']);
+    expect(s.blocked.map((t) => t.title)).toEqual(['blocked']);
   });
 });

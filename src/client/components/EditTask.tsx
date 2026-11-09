@@ -7,7 +7,7 @@ import { useStore } from '../store';
 import { AttachmentList } from './Attachments';
 import { MarkdownEditor, uploadAll } from './MarkdownEditor';
 import { Modal } from './Modal';
-import { applyCompletion, useLabelComplete } from './QuickAdd';
+import { applyCompletion, useCursorAfterRender, useLabelComplete } from './QuickAdd';
 
 type Form = {
   title: string;
@@ -43,6 +43,7 @@ export function EditTask({ task, onSave, onClose }: { task: Task; onSave: (t: Ta
   const [armed, setArmed] = useState(false); // Esc pressed once with unsaved changes
   const [cursor, setCursor] = useState(0);
   const labelsRef = useRef<HTMLInputElement>(null);
+  const placeCursor = useCursorAfterRender(labelsRef);
   const fileRef = useRef<HTMLInputElement>(null);
   const { word, items } = useLabelComplete(f.labels, cursor);
   const set = <K extends keyof Form>(k: K, v: Form[K]) => {
@@ -104,7 +105,7 @@ export function EditTask({ task, onSave, onClose }: { task: Task; onSave: (t: Ta
           const [next, pos] = applyCompletion(f.labels, cursor, word!, items[0]);
           set('labels', next);
           setCursor(pos);
-          requestAnimationFrame(() => labelsRef.current?.setSelectionRange(pos, pos));
+          placeCursor(pos);
           return true;
         }
       }}

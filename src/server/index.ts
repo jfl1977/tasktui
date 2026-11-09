@@ -4,10 +4,10 @@ import { existsSync, promises as fs } from 'node:fs';
 import { dirname, extname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Hono } from 'hono';
-import { formatDuration, toISODate } from '../shared/dates';
-import { summarize } from '../shared/logic';
-import type { Doc } from '../shared/types';
-import { archiveOld, attachmentPath, Conflict, DATA_DIR, getArchive, getDoc, init, saveDoc, storeAttachment } from './storage';
+import { formatDuration, toISODate, toISODateTime } from '../shared/dates';
+import { addFromLine, summarize } from '../shared/logic';
+import type { Attachment, Doc } from '../shared/types';
+import { archiveOld, attachmentPath, Conflict, DATA_DIR, getArchive, getDoc, init, mutateDoc, saveDoc, storeAttachment } from './storage';
 
 const PORT = Number(process.env.TASKTUI_PORT || 8765);
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -45,6 +45,15 @@ app.get('/api/data', (c) => c.json({ doc: getDoc(), archive: getArchive().tasks,
 
 app.put('/api/data', async (c) => c.json({ doc: await saveDoc((await c.req.json()) as Doc) }));
 
+/** Quick capture from the small capture window: the server adds the task, so no rev juggling. */
+app.post('/api/capture', async (c) => {
+  const { line, attachments = [] } = (await c.req.json()) as { line: string; attachments?: Attachment[] };
+  if (!line?.trim()) return c.json({ error: 'empty' }, 400);
+  const now = new Date();
+  const { doc, result } = await mutateDoc((d) => addFromLine(d, line, toISODate(now), toISODateTime(now), attachments));
+  return c.json({ task: result, rev: doc.rev });
+});
+
 app.post('/api/archive', async (c) => {
   const { rev } = (await c.req.json()) as { rev: number };
   const { doc, moved } = await archiveOld(rev);
@@ -81,6 +90,7 @@ app.get('/api/summary', (c) => {
   const parts = [`${s.today} for today`];
   if (s.overdue) parts.push(`${s.overdue} overdue`);
   if (s.waiting) parts.push(`${s.waiting} waiting`);
+  if (s.followUps.length) parts.push(`follow up: ${s.followUps.map((f) => `${f.on} (${f.days}d)`).join(', ')}`);
   if (s.dueTomorrow) parts.push(`${s.dueTomorrow} due tomorrow`);
   if (s.pendingCorrections) parts.push(`${formatDuration(s.pendingMinutes)} of time corrections not submitted`);
   // ASCII separator: Windows PowerShell 5.1 may decode the response as Latin-1.

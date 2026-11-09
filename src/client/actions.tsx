@@ -1,8 +1,6 @@
 import { parseDate, relDay, toISODateTime } from '../shared/dates';
-import { completeTask, minOrder } from '../shared/logic';
-import { captureToTask, parseCapture } from '../shared/parse';
+import { addFromLine, completeTask } from '../shared/logic';
 import type { Attachment, Doc, Task } from '../shared/types';
-import { newTask } from '../shared/types';
 import { openAttachment } from './components/Attachments';
 import { DonePrompt } from './components/DonePrompt';
 import { EditTask } from './components/EditTask';
@@ -21,15 +19,13 @@ export function useTaskActions() {
 
   const actions = {
     add(line: string): string {
-      const c = parseCapture(line, today, doc.settings.label_aliases);
-      const t = newTask(captureToTask(c, today), toISODateTime(new Date()));
-      update(`add "${t.title}"`, (d) => {
-        t.order = minOrder(d.tasks, 'order');
-        t.today_order = d.tasks.reduce((m, x) => Math.max(m, x.today_order), 0) + 1;
-        d.tasks.push(t);
+      let t: Task | null = null;
+      update('add task', (d) => {
+        t = addFromLine(d, line, today, toISODateTime(new Date()));
       });
-      notify(`Added "${t.title}"`);
-      return t.id;
+      const added = t as Task | null;
+      notify(`Added "${added?.title}"`);
+      return added?.id ?? '';
     },
 
     complete(id: string, date: string) {

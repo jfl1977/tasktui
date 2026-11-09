@@ -1,8 +1,9 @@
 # Starts the tasktui server in the background if needed, then opens the app window.
 #   powershell -ExecutionPolicy Bypass -File scripts\tasktui.ps1          start + open
 #   powershell -ExecutionPolicy Bypass -File scripts\tasktui.ps1 -NoOpen  start only
+#   powershell -ExecutionPolicy Bypass -File scripts\tasktui.ps1 -Capture small quick-capture window
 #   powershell -ExecutionPolicy Bypass -File scripts\tasktui.ps1 -Stop    stop the server
-param([switch]$NoOpen, [switch]$Stop)
+param([switch]$NoOpen, [switch]$Capture, [switch]$Stop)
 $ErrorActionPreference = 'Stop'
 
 $Root = Split-Path -Parent $PSScriptRoot
@@ -37,5 +38,9 @@ if (-not $NoOpen) {
     "${env:ProgramFiles(x86)}\Microsoft\Edge\Application\msedge.exe",
     "$env:ProgramFiles\Microsoft\Edge\Application\msedge.exe"
   ) | Where-Object { Test-Path $_ } | Select-Object -First 1
-  if ($edge) { Start-Process $edge "--app=$Url" } else { Start-Process $Url }
+  if ($Capture) {
+    # Small window near the top of the screen, like a launcher.
+    $winArgs = "--app=$Url/capture --window-size=720,210 --window-position=400,120"
+    if ($edge) { Start-Process $edge $winArgs } else { Start-Process "$Url/capture" }
+  } elseif ($edge) { Start-Process $edge "--app=$Url" } else { Start-Process $Url }
 }

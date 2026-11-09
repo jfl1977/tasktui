@@ -2,7 +2,8 @@
 
 A keyboard-first todo app for work that looks like a terminal app but runs in a browser window.
 It has labels (`#project:apollo`), Enter-Enter to mark done, screenshots pasted with Ctrl+V,
-day and week notes, a weekly summary to paste into Teams or Outlook, time-tracker corrections,
+day and week notes, a standup summary (`c`), follow-up nudges for tasks waiting too long,
+quick capture from anywhere, a weekly summary to paste into Teams or Outlook, time-tracker corrections,
 fuzzy search, archive, backups and undo. Everything stays on your computer in one JSON file plus
 an attachments folder.
 
@@ -21,13 +22,21 @@ powershell -ExecutionPolicy Bypass -File scripts\install-windows.ps1
 This creates:
 - a **tasktui** Start menu shortcut with the hotkey **Ctrl+Alt+T**. It starts the server in the
   background and opens the app in its own Edge window.
+- a **tasktui capture** shortcut with the hotkey **Ctrl+Alt+N**: a small box to add a task from
+  anywhere (Teams, Outlook, a meeting) without leaving what you're doing.
 - **reminder toasts** on weekdays at **08:30 and 15:30**.
 
-Options: `-Hotkey "CTRL+ALT+Y"`, `-Times "08:00","16:00"`, `-Uninstall`.
+Options: `-Hotkey "CTRL+ALT+Y"`, `-CaptureHotkey "CTRL+ALT+J"`, `-Times "08:00","16:00"`, `-Uninstall`.
 
 To update later: `git pull`, then `scripts\tasktui.ps1 -Stop` (the next launch starts the new version).
 
 Your data lives in `%USERPROFILE%\tasktui-data` (set `TASKTUI_HOME` to use another folder).
+
+## Use it on Linux
+
+`scripts/tasktui.sh` starts the server if needed and opens the app (`--capture` for the quick-capture
+box, `--stop` to stop). Bind it to keys in your desktop; for Omarchy/Hyprland see
+[docs/SPEC.md §9](docs/SPEC.md#9-windows-integration).
 
 ## Develop
 
