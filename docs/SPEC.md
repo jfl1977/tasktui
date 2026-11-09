@@ -112,8 +112,8 @@ notes or tasks are left out of the copy.
 ### 2.3 Capture window (`/capture`)
 
 A small separate window, opened from anywhere by its own hotkey (default Ctrl+Alt+N):
-one quick-capture line with label autocomplete and preview chips. ⏎ adds and closes,
-Shift+⏎ adds and stays open, Ctrl+V or drop attaches screenshots/files to the new task, Esc closes.
+the quick-capture box with label autocomplete and preview (bulk too, see 3.1). ⏎ adds and closes,
+Ctrl+⏎ adds and stays open, Shift+⏎ starts another task line, Ctrl+V or drop attaches screenshots/files to the new task, Esc closes.
 The server adds the task (`POST /api/capture`). Open main windows pick it up when they get focus
 (they also check every 15 s while idle), so the two windows never overwrite each other.
 Picking up outside changes clears the undo history (old snapshots would undo them).
@@ -155,6 +155,26 @@ Fix export bug #clientx #p:apollo @jira PROJ-123 ^fri ~mon * every:fri
 | `every:rule` | repeat |
 
 Invalid dates/rules are reported and left in the title so nothing typed is lost.
+
+### 3.1 Bulk add (several lines)
+
+The add box (`a`) and the capture window take several lines, typed with Shift+⏎ or pasted:
+
+```
+#p:apollo @meeting ^fri
+- Update the export docs
+- Ask Marc for the pricing file #req:marc @email
+3. Review Sara's PR *
+```
+
+- One task per line. List markers are stripped: `- ` `* ` `• ` `+ ` `1. ` `2) ` `[ ] ` `[x] ` `☐ `.
+  Empty lines are ignored.
+- A line with only tokens (no title) applies to **every** task, wherever it is in the list.
+  A line's own tokens win (`@email` above), labels are combined.
+- The preview lists the tasks ("3 tasks · for all: …"), each with what differs from the shared tokens.
+- Tasks keep the pasted order, at the top of the list. One undo removes the whole batch.
+- In the capture window, attached screenshots go to every task of the batch.
+- Note: a line `* #p:x` is read as a bullet; write `#p:x *` to pin a whole batch to today.
 
 ---
 
@@ -198,11 +218,20 @@ Invalid dates/rules are reported and left in the title so nothing typed is lost.
 | Ctrl+V | attach screenshots / files copied in Explorer to the selected task |
 | drop files | attach to the row they're dropped on (or the selected task) |
 | `d` / Del | delete (confirm) |
+| `l` | add/remove labels: `#a` or `+#a` adds, `-#b` removes |
+| `v` / space, Ctrl+click | mark / unmark task (multi-select), cursor moves down |
+| `V` | mark all visible / clear |
+| Esc | clear marks |
 | Alt+↑/↓, `K`/`J` | move task |
 | `g` | cycle grouping |
 | `S` | cycle sort |
 | Sidebar: ⏎/`l`/→ | show that entry |
 | Sidebar: space | combine labels |
+
+With tasks marked, ⏎ (done, same date for all), `*` (pin all, or unpin when all are pinned),
+`w` (waiting on the same person; toggles off when all are waiting), `s` (snooze all), `l` (labels)
+and `d` (delete all) act on every marked task. `e`, `o`, `f` still act on the cursor task.
+Marks only cover visible tasks and are cleared when the view changes. Each bulk action is one undo step.
 
 ### 4.4 Week view
 
@@ -305,7 +334,7 @@ Listens on `127.0.0.1:${TASKTUI_PORT:-8765}` only.
 |---|---|---|
 | GET | `/api/ping` | `{ok, app:"tasktui"}` (used by the launcher) |
 | GET | `/api/data` | `{doc, archive, dataDir}` |
-| POST | `/api/capture` | `{line, attachments?}` → server adds the task → `{task, rev}` |
+| POST | `/api/capture` | `{text, attachments?}` (one task per line, see 3.1) → `{tasks, rev}` |
 | PUT | `/api/data` | save the whole doc; body `rev` must match; returns `{doc}` with new `rev`, or 409 `{doc}` |
 | POST | `/api/archive` | `{rev}` → `{doc, archive, moved}` |
 | POST | `/api/attachments?name=x.png` | raw body → `{file, name, added}` |
@@ -320,7 +349,7 @@ Listens on `127.0.0.1:${TASKTUI_PORT:-8765}` only.
 
 `scripts/` (ASCII-only, because Windows PowerShell 5.1 misreads UTF-8 without a BOM):
 
-- `tasktui.ps1 -Capture`: same, but opens the small capture window (720×210).
+- `tasktui.ps1 -Capture`: same, but opens the small capture window (760×330).
 - `tasktui.ps1`: starts `node dist/server.js` hidden if `/api/ping` doesn't answer (log in
   `%TEMP%\tasktui.log`), then opens `msedge --app=http://localhost:8765` (falls back to the
   default browser). `-NoOpen` only starts, `-Stop` stops.
@@ -341,7 +370,7 @@ On Omarchy/Hyprland, bind it in `~/.config/hypr/bindings.lua` and float the capt
 o.bind("SUPER + ALT + T", "Tasks", "~/Projects/tasktui/scripts/tasktui.sh")
 o.bind("SUPER + ALT + N", "Quick task", "~/Projects/tasktui/scripts/tasktui.sh --capture")
 -- in hyprland.lua:
-o.window("chrome-localhost__capture-Default", { float = true, center = true, size = { 720, 220 } })
+o.window("chrome-localhost__capture-Default", { float = true, center = true, size = { 760, 320 } })
 ```
 
 ## 10. Code layout

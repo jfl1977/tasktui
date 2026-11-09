@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { formatDuration, isoWeek, minutesBetween, mondayOf, parseDate, parseDateTime, parseRange, weekKey } from '../src/shared/dates';
-import { addFromLine, completeTask, isOnToday, matchesView, previousWorkday, staleWaiting, standup, summarize } from '../src/shared/logic';
-import { normalizeLabel, parseCapture } from '../src/shared/parse';
+import { addFromLine, addText, completeTask, isOnToday, matchesView, previousWorkday, staleWaiting, standup, summarize } from '../src/shared/logic';
+import { normalizeLabel, parseBulk, parseCapture, stripBullet } from '../src/shared/parse';
 import { nextOccurrence } from '../src/shared/recur';
 import { emptyDoc, newTask } from '../src/shared/types';
 
@@ -161,5 +161,36 @@ describe('task logic', () => {
     expect(s.yesterday.map((t) => t.title).sort()).toEqual(['archived fri', 'fri', 'sat']);
     expect(s.today.map((t) => t.title)).toEqual(['pinned']);
     expect(s.blocked.map((t) => t.title)).toEqual(['blocked']);
+  });
+
+});
+
+describe('bulk add', () => {
+  const LIST = ['#p:apollo @meeting ^fri', '', '- Update the export docs', '* Ask Marc for the pricing file #req:marc @email', '3. Review PROJ-7 ^mon', '[ ] Book room', '☐ Send notes *'].join('\n');
+  it('strips bullets and checkboxes', () => {
+    expect(['- a', '* b', '• c', '12. d', '3) e', '- [ ] f', '[x] g', '☐ h', '  - i'].map(stripBullet)).toEqual(['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i']);
+    expect(stripBullet('*')).toBe('*'); // the "today" token on its own stays
+  });
+  it('applies token-only lines to every task; own tokens win', () => {
+    const { items, common } = parseBulk(LIST, TODAY, { p: 'project' });
+    expect(items.map((c) => c.title)).toEqual(['Update the export docs', 'Ask Marc for the pricing file', 'Review PROJ-7', 'Book room', 'Send notes']);
+    expect(common.labels).toEqual(['project:apollo']);
+    expect(items.every((c) => c.labels.includes('project:apollo'))).toBe(true);
+    expect(items[1]).toMatchObject({ source: 'email', labels: ['project:apollo', 'req:marc'] });
+    expect(items[0]).toMatchObject({ source: 'meeting', due: '2026-11-13' });
+    expect(items[2]).toMatchObject({ due: '2026-11-09', ref: 'PROJ-7', source: 'meeting' });
+    expect(items[4].today).toBe(true);
+  });
+  it('adds in pasted order at the top of the list', () => {
+    const doc = emptyDoc();
+    addFromLine(doc, 'Existing', TODAY, '2026-11-08T08:00');
+    const added = addText(doc, 'one\ntwo\nthree', TODAY, '2026-11-08T09:00');
+    const sorted = [...doc.tasks].sort((a, b) => a.order - b.order).map((t) => t.title);
+    expect(sorted).toEqual(['one', 'two', 'three', 'Existing']);
+    expect(added.map((t) => t.today_order)).toEqual([...added.map((t) => t.today_order)].sort((a, b) => a - b));
+  });
+  it('a single line still works and token-only text adds nothing', () => {
+    expect(parseBulk('Just one #x', TODAY).items).toHaveLength(1);
+    expect(parseBulk('#x @email', TODAY).items).toHaveLength(0);
   });
 });

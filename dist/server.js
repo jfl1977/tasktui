@@ -3351,6 +3351,25 @@ function parseCapture(line, today, aliases = {}) {
   out.title = words.join(" ");
   return out;
 }
+var BULLET = /^\s*(?:(?:[-*•+–]|\d{1,3}[.)])\s+)?(?:\[[ xX]?\]\s*|[☐☑✓]\s*)?/;
+function stripBullet(line) {
+  return line.replace(BULLET, "").trim();
+}
+function parseBulk(text, today, aliases = {}) {
+  const lines = text.split(/\r?\n/).map(stripBullet).filter(Boolean);
+  const commonLines = [];
+  const taskLines = [];
+  for (const l of lines) {
+    const c = parseCapture(l, today, aliases);
+    (c.title || c.errors.length ? taskLines : commonLines).push(l);
+  }
+  const common = commonLines.join(" ");
+  return {
+    // Shared tokens first, so the line's own @source / ^due override them.
+    items: taskLines.map((l) => parseCapture(common ? `${common} ${l}` : l, today, aliases)),
+    common: parseCapture(common, today, aliases)
+  };
+}
 function captureToTask(c, today) {
   return {
     title: c.title,
@@ -3440,13 +3459,18 @@ function archiveCandidates(doc2, today) {
 function correctionMinutes(c) {
   return minutesBetween(c.from, c.to);
 }
-function addFromLine(doc2, line, today, now, attachments = []) {
-  const c = parseCapture(line, today, doc2.settings.label_aliases);
-  const t = newTask({ ...captureToTask(c, today), attachments }, now);
-  t.order = minOrder(doc2.tasks, "order");
-  t.today_order = doc2.tasks.reduce((m, x) => Math.max(m, x.today_order), 0) + 1;
-  doc2.tasks.push(t);
-  return t;
+function addText(doc2, text, today, now, attachments = []) {
+  const { items } = parseBulk(text, today, doc2.settings.label_aliases);
+  const top = minOrder(doc2.tasks, "order");
+  const lastToday = doc2.tasks.reduce((m, x) => Math.max(m, x.today_order), 0);
+  const added = items.map((c, i) => {
+    const t = newTask({ ...captureToTask(c, today), attachments: structuredClone(attachments) }, now);
+    t.order = top - (items.length - 1) + i;
+    t.today_order = lastToday + 1 + i;
+    return t;
+  });
+  doc2.tasks.push(...added);
+  return added;
 }
 function staleWaiting(doc2, today) {
   return doc2.tasks.filter((t) => !t.done && t.waiting && waitingDays(t, today) >= doc2.settings.waiting_nudge_days).sort((a, b) => waitingDays(b, today) - waitingDays(a, today));
@@ -3613,11 +3637,12 @@ app.get("/api/ping", (c) => c.json({ ok: true, app: "tasktui" }));
 app.get("/api/data", (c) => c.json({ doc: getDoc(), archive: getArchive().tasks, dataDir: DATA_DIR }));
 app.put("/api/data", async (c) => c.json({ doc: await saveDoc(await c.req.json()) }));
 app.post("/api/capture", async (c) => {
-  const { line, attachments = [] } = await c.req.json();
-  if (!line?.trim()) return c.json({ error: "empty" }, 400);
+  const body = await c.req.json();
+  const text = body.text ?? body.line ?? "";
   const now = /* @__PURE__ */ new Date();
-  const { doc: doc2, result } = await mutateDoc((d) => addFromLine(d, line, toISODate(now), toISODateTime(now), attachments));
-  return c.json({ task: result, rev: doc2.rev });
+  const { doc: doc2, result } = await mutateDoc((d) => addText(d, text, toISODate(now), toISODateTime(now), body.attachments ?? []));
+  if (!result.length) return c.json({ error: "No task title found" }, 400);
+  return c.json({ tasks: result, rev: doc2.rev });
 });
 app.post("/api/archive", async (c) => {
   const { rev } = await c.req.json();

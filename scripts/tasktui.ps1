@@ -40,7 +40,7 @@ if (-not $NoOpen) {
   ) | Where-Object { Test-Path $_ } | Select-Object -First 1
   if ($Capture) {
     # Small window near the top of the screen, like a launcher.
-    $winArgs = "--app=$Url/capture --window-size=720,210 --window-position=400,120"
+    $winArgs = "--app=$Url/capture --window-size=760,330 --window-position=400,120"
     if ($edge) { Start-Process $edge $winArgs } else { Start-Process "$Url/capture" }
   } elseif ($edge) { Start-Process $edge "--app=$Url" } else { Start-Process $Url }
 }

@@ -45,6 +45,10 @@ export function Help({ onClose }: { onClose: () => void }) {
               {row(['f'], 'Attach files')}
               {row(['ctrl+v'], 'Paste screenshot / copied files onto the task')}
               {row(['d'], 'Delete')}
+              {row(['l'], 'Add / remove labels (+#x -#y)')}
+              {row(['v', 'space'], 'Mark task (multi-select), ctrl+click too')}
+              {row(['V'], 'Mark all / clear')}
+              {row(['esc'], 'Clear marks')}
               {row(['alt+↑', 'alt+↓'], 'Move task (or drag)')}
               {row(['g'], 'Group by project / module / … / source')}
               {row(['S'], 'Sort: my order / due / newest')}
@@ -69,6 +73,8 @@ export function Help({ onClose }: { onClose: () => void }) {
               {row(['x'], 'Export week as .md')}
             </tbody>
           </table>
+          <h3>Marked tasks</h3>
+          <p>With tasks marked, <K k="⏎" /> <K k="*" /> <K k="w" /> <K k="s" /> <K k="l" /> <K k="d" /> act on all of them.</p>
           <h3>Quick capture</h3>
           <table>
             <tbody>
@@ -79,6 +85,7 @@ export function Help({ onClose }: { onClose: () => void }) {
               <tr><td><code>~mon</code></td><td>snooze until</td></tr>
               <tr><td><code>*</code></td><td>pin to today</td></tr>
               <tr><td><code>every:fri</code></td><td>repeat: day weekday mon,thu month:1</td></tr>
+              <tr><td><kbd>shift+⏎</kbd> / paste a list</td><td>one task per line; a line with only tokens applies to all</td></tr>
             </tbody>
           </table>
           <h3>Dates</h3>

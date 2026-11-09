@@ -59,3 +59,6 @@ Fix export bug #p:apollo #req:marc @jira PROJ-123 ^fri ~mon * every:fri
 ```
 
 `#label` · `@source` · `PROJ-123` / URL as reference · `^due` · `~snooze` · `*` today · `every:rule` repeat
+
+Paste a list (or use Shift+Enter) to add several tasks at once; a line with only tokens applies to all.
+In the list, `v` marks tasks and Enter, `*`, `w`, `s`, `l`, `d` then act on all marked tasks.

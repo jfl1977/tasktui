@@ -5,7 +5,7 @@ import { dirname, extname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Hono } from 'hono';
 import { formatDuration, toISODate, toISODateTime } from '../shared/dates';
-import { addFromLine, summarize } from '../shared/logic';
+import { addText, summarize } from '../shared/logic';
 import type { Attachment, Doc } from '../shared/types';
 import { archiveOld, attachmentPath, Conflict, DATA_DIR, getArchive, getDoc, init, mutateDoc, saveDoc, storeAttachment } from './storage';
 
@@ -47,11 +47,13 @@ app.put('/api/data', async (c) => c.json({ doc: await saveDoc((await c.req.json(
 
 /** Quick capture from the small capture window: the server adds the task, so no rev juggling. */
 app.post('/api/capture', async (c) => {
-  const { line, attachments = [] } = (await c.req.json()) as { line: string; attachments?: Attachment[] };
-  if (!line?.trim()) return c.json({ error: 'empty' }, 400);
+  // `text` may hold several lines (bulk add); `line` is accepted for older clients.
+  const body = (await c.req.json()) as { text?: string; line?: string; attachments?: Attachment[] };
+  const text = body.text ?? body.line ?? '';
   const now = new Date();
-  const { doc, result } = await mutateDoc((d) => addFromLine(d, line, toISODate(now), toISODateTime(now), attachments));
-  return c.json({ task: result, rev: doc.rev });
+  const { doc, result } = await mutateDoc((d) => addText(d, text, toISODate(now), toISODateTime(now), body.attachments ?? []));
+  if (!result.length) return c.json({ error: 'No task title found' }, 400);
+  return c.json({ tasks: result, rev: doc.rev });
 });
 
 app.post('/api/archive', async (c) => {

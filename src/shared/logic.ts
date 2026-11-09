@@ -1,6 +1,6 @@
 // Pure task logic used by the client (and tests).
 import { addDays, diffDays, minutesBetween } from './dates';
-import { captureToTask, labelParts, parseCapture } from './parse';
+import { captureToTask, labelParts, parseBulk, parseCapture } from './parse';
 import { nextOccurrence } from './recur';
 import type { Attachment, Doc, Task, TimeCorrection } from './types';
 import { newId, newTask } from './types';
@@ -124,6 +124,24 @@ export function addFromLine(doc: Doc, line: string, today: string, now: string, 
   t.today_order = doc.tasks.reduce((m, x) => Math.max(m, x.today_order), 0) + 1;
   doc.tasks.push(t);
   return t;
+}
+
+/**
+ * Add one task per line (see parseBulk), keeping the pasted order at the top of the list.
+ * Attachments go to every task added. Mutates `doc`.
+ */
+export function addText(doc: Doc, text: string, today: string, now: string, attachments: Attachment[] = []): Task[] {
+  const { items } = parseBulk(text, today, doc.settings.label_aliases);
+  const top = minOrder(doc.tasks, 'order');
+  const lastToday = doc.tasks.reduce((m, x) => Math.max(m, x.today_order), 0);
+  const added = items.map((c, i) => {
+    const t = newTask({ ...captureToTask(c, today), attachments: structuredClone(attachments) }, now);
+    t.order = top - (items.length - 1) + i;
+    t.today_order = lastToday + 1 + i;
+    return t;
+  });
+  doc.tasks.push(...added);
+  return added;
 }
 
 /** Open tasks waiting for at least `waiting_nudge_days`, longest first. */

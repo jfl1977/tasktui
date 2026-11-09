@@ -65,6 +65,7 @@ export function TasksView({ active, jump }: { active: boolean; jump: { id: strin
   const [groupBy, setGroupBy] = useState<string>(() => load('groupBy', ''));
   const [sort, setSort] = useState<SortMode>(() => load('sort', 'manual'));
   const [dragId, setDragId] = useState<string | null>(null);
+  const [marked, setMarked] = useState<string[]>([]); // multi-select (v)
   const fileRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
 
@@ -148,6 +149,12 @@ export function TasksView({ active, jump }: { active: boolean; jump: { id: strin
   }, [doc.tasks, JSON.stringify(view), sort, groupBy, today]);
 
   // Keep a valid selection. When the selected task leaves the list (done, snoozed), select its neighbour.
+  // Marks apply to what's on screen; changing view clears them so nothing hidden gets changed.
+  const viewKey = JSON.stringify(view);
+  useEffect(() => setMarked([]), [viewKey]);
+  const markedTasks = visible.filter((t) => marked.includes(t.id));
+  const toggleMark = (id: string) => setMarked((m) => (m.includes(id) ? m.filter((x) => x !== id) : [...m, id]));
+
   const lastIdx = useRef(0);
   let idx = visible.findIndex((t) => t.id === selId);
   if (idx < 0) idx = clamp(lastIdx.current, 0, visible.length - 1);
@@ -266,15 +273,26 @@ export function TasksView({ active, jump }: { active: boolean; jump: { id: strin
     if (k === 'End') return handled(), go(visible.length - 1);
     if (k === 'PageDown') return handled(), go(idx + 10);
     if (k === 'PageUp') return handled(), go(idx - 10);
+    if (k === 'V') {
+      handled();
+      const all = markedTasks.length === visible.length;
+      setMarked(all ? [] : visible.map((t) => t.id));
+      return notify(all ? 'Marks cleared' : `Marked all ${visible.length}`);
+    }
+    if (k === 'Escape' && marked.length) return handled(), setMarked([]);
     if (!sel) return;
-    if (k === 'Enter') return handled(), flows.done(sel);
+    if (k === 'v' || k === 'space') return handled(), toggleMark(sel.id), go(idx + 1);
+    // With marked tasks, these act on all of them; otherwise on the selected task.
+    const targets = markedTasks.length ? markedTasks : [sel];
+    if (k === 'Enter') return handled(), flows.done(targets);
+    if (k === 'l') return handled(), flows.labels(targets);
     if (k === 'e') return handled(), flows.edit(sel);
-    if (k === '*') return handled(), act.togglePin(sel);
-    if (k === 'w') return handled(), flows.waiting(sel);
-    if (k === 's') return handled(), flows.snooze(sel);
+    if (k === '*') return handled(), act.togglePin(targets);
+    if (k === 'w') return handled(), flows.waiting(targets);
+    if (k === 's') return handled(), flows.snooze(targets);
     if (k === 'o') return handled(), flows.open(sel);
     if (k === 'f') return handled(), fileRef.current?.click();
-    if (k === 'd' || k === 'Delete') return handled(), flows.remove(sel);
+    if (k === 'd' || k === 'Delete') return handled(), flows.remove(targets);
     if (k === 'alt+ArrowUp' || k === 'alt+ArrowDown' || k === 'K' || k === 'J') {
       handled();
       if (sort !== 'manual' || view.kind === 'done') return notify('Switch to "my order" (S) to reorder', 'error');
@@ -339,6 +357,7 @@ export function TasksView({ active, jump }: { active: boolean; jump: { id: strin
             {' '}
             {visible.length} · {SORT_TEXT[sort]}
             {groupBy && ` · by ${groupBy}`}
+            {markedTasks.length > 0 && <span className="marked-count"> · {markedTasks.length} marked (esc clears)</span>}
           </span>
         </div>
         <div className="task-list" ref={listRef}>
@@ -353,8 +372,9 @@ export function TasksView({ active, jump }: { active: boolean; jump: { id: strin
                 task={r.task}
                 today={today}
                 selected={r.task.id === sel?.id}
+                marked={marked.includes(r.task.id)}
                 showToday={view.kind !== 'today'}
-                onClick={() => (setSelId(r.task.id), setPane('list'))}
+                onClick={(ev) => (ev.ctrlKey ? toggleMark(r.task.id) : setSelId(r.task.id), setPane('list'))}
                 onDoubleClick={() => flows.edit(r.task)}
                 draggable={sort === 'manual' && !groupBy && view.kind !== 'done'}
                 dragging={dragId === r.task.id}
@@ -388,6 +408,7 @@ function TaskRow({
   task: t,
   today,
   selected,
+  marked,
   showToday,
   onClick,
   onDoubleClick,
@@ -400,8 +421,9 @@ function TaskRow({
   task: Task;
   today: string;
   selected: boolean;
+  marked: boolean;
   showToday: boolean;
-  onClick: () => void;
+  onClick: (e: React.MouseEvent) => void;
   onDoubleClick: () => void;
   draggable: boolean;
   dragging: boolean;
@@ -415,7 +437,7 @@ function TaskRow({
   const stale = isStale(t, doc, today);
   return (
     <div
-      className={`task ${selected ? 'sel' : ''} ${t.done ? 'is-done' : ''} ${dragging ? 'dragging' : ''} ${over ? 'drop' : ''}`}
+      className={`task ${selected ? 'sel' : ''} ${marked ? 'marked' : ''} ${t.done ? 'is-done' : ''} ${dragging ? 'dragging' : ''} ${over ? 'drop' : ''}`}
       onClick={onClick}
       onDoubleClick={onDoubleClick}
       draggable={draggable}
@@ -433,7 +455,7 @@ function TaskRow({
         onDropRow(filesFrom(e.dataTransfer));
       }}
     >
-      <span className="status">{t.done ? '✓' : t.waiting ? '⏳' : '☐'}</span>
+      <span className="status">{marked ? '●' : t.done ? '✓' : t.waiting ? '⏳' : '☐'}</span>
       {showToday && isOnToday(t, today) && t.today && <span className="star">★</span>}
       <span className="title">{t.title}</span>
       {t.labels.map((l) => {

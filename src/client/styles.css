@@ -751,6 +751,36 @@ main {
   padding-left: 1.4em;
 }
 
+.task.marked {
+  background: color-mix(in srgb, var(--warn) 14%, transparent);
+}
+.task.marked .status,
+.marked-count {
+  color: var(--warn);
+}
+.capture-box textarea {
+  resize: none;
+  line-height: 1.45;
+}
+.bulk-preview {
+  margin-top: 8px;
+}
+.bulk-preview ol {
+  margin: 4px 0 0;
+  padding-left: 2.2em;
+  max-height: 45vh;
+  overflow: auto;
+}
+.bulk-preview li {
+  padding: 1px 0;
+}
+.bulk-preview .chip {
+  margin-left: 4px;
+}
+.capture-app {
+  overflow: auto;
+}
+
 @media (max-width: 900px) {
   .tasks-view {
     grid-template-columns: 170px minmax(0, 1fr);

@@ -132,7 +132,7 @@ check(json().tasks.find((t) => t.title.startsWith('Answer')).title.endsWith('adw
 await key('g');
 check((await page.$$('.group-row')).length > 0, 'g groups the list');
 await page.screenshot({ path: join(shots, '1-tasks.png') });
-await key('g', 'g', 'g', 'g');
+for (let i = 0; i < 10 && (await page.$$('.group-row')).length; i++) await key('g'); // back to no grouping
 
 // Week view: day note with screenshot, time correction
 await key('2');
@@ -183,11 +183,11 @@ await key('Escape');
 const cap = await browser.newPage({ viewport: { width: 720, height: 210 }, colorScheme: 'dark' });
 cap.on('pageerror', (e) => errors.push(e.message));
 await cap.goto(`http://localhost:${PORT}/capture`);
-await cap.waitForSelector('.capture-app input');
+await cap.waitForSelector('.capture-app textarea');
 await cap.keyboard.type('Reply to Teams thread #proj');
 await cap.keyboard.press('Tab');
 await cap.keyboard.type('@teams *');
-await cap.keyboard.press('Shift+Enter');
+await cap.keyboard.press('Control+Enter');
 await cap.waitForTimeout(400);
 let captured = json().tasks.find((t) => t.title === 'Reply to Teams thread');
 check(captured?.source === 'teams' && captured.labels[0] === 'project:apollo' && captured.today, 'capture window adds a task (autocomplete, source, today)');
@@ -218,6 +218,61 @@ check(stand.includes('Today') && stand.includes('Reply to Teams thread'), 'stand
 check(stand.includes('waiting on Marc for 5 days'), 'standup lists blocked tasks');
 await page.screenshot({ path: join(shots, '6-standup.png') });
 await key('Escape');
+
+// Bulk add: paste a list into the add box.
+await key('1', 'a');
+await page.fill('.modal textarea', '#p:apollo @meeting ^fri\n- Update the export docs\n- Ask Marc for the pricing file #req:marc\n3. Review Sara PR *');
+await page.waitForSelector('.bulk-preview');
+check((await page.$eval('.bulk-preview', (e) => e.textContent)).includes('3 tasks'), 'bulk add shows a 3-task preview');
+await page.screenshot({ path: join(shots, '7-bulk.png') });
+await key('Enter');
+const bulkTitles = ['Update the export docs', 'Ask Marc for the pricing file', 'Review Sara PR'];
+doc = json();
+let bulk = bulkTitles.map((t) => doc.tasks.find((x) => x.title === t));
+check(bulk.every((t) => t && t.labels.includes('project:apollo') && t.source === 'meeting' && t.due), 'bulk add applies shared tokens to every task');
+check(bulk[1].labels.includes('req:marc') && bulk[2].today, 'bulk add keeps per-line tokens');
+check(bulk[0].order < bulk[1].order && bulk[1].order < bulk[2].order, 'bulk add keeps the pasted order');
+await key('u');
+check(!json().tasks.some((t) => bulkTitles.includes(t.title)), 'one undo removes the whole batch');
+await key('a');
+await page.keyboard.type('Update the export docs #bulk');
+await key('Shift+Enter');
+await page.keyboard.type('Ask Marc for the pricing file');
+await key('Shift+Enter');
+await page.keyboard.type('#bulk');
+await key('Enter');
+doc = json();
+check(bulkTitles.slice(0, 2).every((t) => doc.tasks.find((x) => x.title === t)?.labels.includes('bulk')), 'shift+enter lines add several tasks (token line at the end)');
+
+// Multi-select: mark the two new tasks (top of Inbox), then act on both.
+await page.click('.side-item:has-text("Inbox")');
+await key('Home', 'v', 'v');
+check((await page.$$('.task.marked')).length === 2, 'v marks tasks');
+await key('*');
+doc = json();
+check(bulkTitles.slice(0, 2).every((t) => doc.tasks.find((x) => x.title === t)?.today), '* pins all marked tasks');
+await key('l');
+await page.keyboard.type('+#urgent -#bulk');
+await key('Enter');
+doc = json();
+check(bulkTitles.slice(0, 2).every((t) => { const l = doc.tasks.find((x) => x.title === t)?.labels; return l?.includes('urgent') && !l.includes('bulk'); }), 'l adds and removes labels on marked tasks');
+await page.screenshot({ path: join(shots, '8-marked.png') });
+await key('Enter', 'Enter');
+doc = json();
+check(bulkTitles.slice(0, 2).every((t) => doc.tasks.find((x) => x.title === t)?.done === iso(new Date())), 'Enter Enter marks all marked tasks done');
+check((await page.$$('.task.marked')).length === 0, 'done tasks leave the marks');
+
+// Bulk in the capture window.
+const cap2 = await browser.newPage({ viewport: { width: 760, height: 320 }, colorScheme: 'dark' });
+await cap2.goto(`http://localhost:${PORT}/capture`);
+await cap2.waitForSelector('.capture-app textarea');
+await cap2.fill('.capture-app textarea', '@teams\n- Reply to Paul\n- Reply to Ana');
+await cap2.waitForSelector('.bulk-preview');
+await cap2.keyboard.press('Control+Enter');
+await cap2.waitForTimeout(400);
+doc = json();
+check(['Reply to Paul', 'Reply to Ana'].every((t) => doc.tasks.find((x) => x.title === t)?.source === 'teams'), 'capture window adds a pasted list');
+await cap2.close();
 
 await key('?');
 await page.screenshot({ path: join(shots, '4-help.png') });

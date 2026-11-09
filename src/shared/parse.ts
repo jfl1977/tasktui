@@ -88,6 +88,40 @@ export function parseCapture(line: string, today: string, aliases: Record<string
   return out;
 }
 
+// List markers from Outlook, OneNote, Teams, Markdown: "- ", "* ", "• ", "1. ", "2) ", "[ ] ", "☐ ".
+const BULLET = /^\s*(?:(?:[-*•+–]|\d{1,3}[.)])\s+)?(?:\[[ xX]?\]\s*|[☐☑✓]\s*)?/;
+
+export function stripBullet(line: string): string {
+  return line.replace(BULLET, '').trim();
+}
+
+export interface Bulk {
+  /** One entry per task line, with the shared tokens applied. */
+  items: Captured[];
+  /** Tokens from lines that have no title, applied to every task. */
+  common: Captured;
+}
+
+/**
+ * Parse several lines at once. Each line with a title becomes a task. A line made only of
+ * tokens ("#p:apollo @meeting ^fri") applies to every task; a task's own tokens win over it.
+ */
+export function parseBulk(text: string, today: string, aliases: Record<string, string> = {}): Bulk {
+  const lines = text.split(/\r?\n/).map(stripBullet).filter(Boolean);
+  const commonLines: string[] = [];
+  const taskLines: string[] = [];
+  for (const l of lines) {
+    const c = parseCapture(l, today, aliases);
+    (c.title || c.errors.length ? taskLines : commonLines).push(l);
+  }
+  const common = commonLines.join(' ');
+  return {
+    // Shared tokens first, so the line's own @source / ^due override them.
+    items: taskLines.map((l) => parseCapture(common ? `${common} ${l}` : l, today, aliases)),
+    common: parseCapture(common, today, aliases),
+  };
+}
+
 /** Turn capture results into task fields. */
 export function captureToTask(c: Captured, today: string): Partial<Task> {
   return {

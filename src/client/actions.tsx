@@ -1,5 +1,6 @@
 import { parseDate, relDay, toISODateTime } from '../shared/dates';
-import { addFromLine, completeTask } from '../shared/logic';
+import { addText, completeTask } from '../shared/logic';
+import { normalizeLabel } from '../shared/parse';
 import type { Attachment, Doc, Task } from '../shared/types';
 import { openAttachment } from './components/Attachments';
 import { DonePrompt } from './components/DonePrompt';
@@ -12,30 +13,42 @@ import { jiraUrl } from './util';
 
 const find = (d: Doc, id: string) => d.tasks.find((t) => t.id === id);
 
+export function parseRelabel(v: string, aliases: Record<string, string>) {
+  const add: string[] = [];
+  const remove: string[] = [];
+  for (const tok of v.trim().split(/[\s,]+/).filter(Boolean)) {
+    const m = tok.match(/^([+-]?)#?(.+)$/);
+    if (!m || (!tok.includes('#') && !m[1])) continue;
+    (m[1] === '-' ? remove : add).push(normalizeLabel(m[2], aliases));
+  }
+  return { add, remove };
+}
+
 /** Task operations plus the dialogs that drive them. Shared by the views and search. */
 export function useTaskActions() {
   const { doc, today, update, notify } = useStore();
   const { openModal } = useUI();
 
   const actions = {
-    add(line: string): string {
-      let t: Task | null = null;
-      update('add task', (d) => {
-        t = addFromLine(d, line, today, toISODateTime(new Date()));
+    /** Add one task per line (bulk add). One undo step removes them all. Returns the first id. */
+    add(text: string): string {
+      let added: Task[] = [];
+      update('add', (d) => {
+        added = addText(d, text, today, toISODateTime(new Date()));
       });
-      const added = t as Task | null;
-      notify(`Added "${added?.title}"`);
-      return added?.id ?? '';
+      notify(added.length === 1 ? `Added "${added[0].title}"` : `Added ${added.length} tasks (u to undo)`);
+      return added[0]?.id ?? '';
     },
 
-    complete(id: string, date: string) {
+    complete(ids: string[], date: string) {
       let next: Task | null = null;
-      update('mark done', (d) => {
-        next = completeTask(d, id, date);
+      update(ids.length > 1 ? `mark ${ids.length} done` : 'mark done', (d) => {
+        for (const id of ids) next = completeTask(d, id, date) ?? next;
       });
       const n = next as Task | null;
-      const when = date === today ? 'Done ✓' : `Done on ${relDay(date, today)} ✓`;
-      notify(when + (n?.due ? ` · next one due ${relDay(n.due, today)}` : ''));
+      const what = ids.length > 1 ? `${ids.length} tasks done` : 'Done';
+      const when = date === today ? `${what} ✓` : `${what} on ${relDay(date, today)} ✓`;
+      notify(when + (n?.due && ids.length === 1 ? ` · next one due ${relDay(n.due, today)}` : ''));
     },
 
     reopen(id: string) {
@@ -53,21 +66,40 @@ export function useTaskActions() {
       });
     },
 
-    togglePin(task: Task) {
-      const on = !(task.today && task.today <= today);
+    /** Pin all to today, or unpin all when they're all pinned already. */
+    togglePin(tasks: Task[]) {
+      const on = !tasks.every((t) => t.today && t.today <= today);
       update(on ? 'pin to today' : 'unpin from today', (d) => {
-        const t = find(d, task.id)!;
-        t.today = on ? today : null;
-        if (on) t.today_order = d.tasks.reduce((m, x) => Math.max(m, x.today_order), 0) + 1;
+        let next = d.tasks.reduce((m, x) => Math.max(m, x.today_order), 0);
+        for (const task of tasks) {
+          const t = find(d, task.id)!;
+          if (on && t.today && t.today <= today) continue;
+          t.today = on ? today : null;
+          if (on) t.today_order = ++next;
+        }
       });
-      notify(on ? '★ Pinned to today' : 'Unpinned from today');
+      const n = tasks.length > 1 ? ` (${tasks.length})` : '';
+      notify(on ? `★ Pinned to today${n}` : `Unpinned from today${n}`);
     },
 
-    remove(task: Task) {
-      update(`delete "${task.title}"`, (d) => {
-        d.tasks = d.tasks.filter((t) => t.id !== task.id);
+    remove(tasks: Task[]) {
+      const ids = new Set(tasks.map((t) => t.id));
+      update(tasks.length > 1 ? `delete ${tasks.length} tasks` : `delete "${tasks[0].title}"`, (d) => {
+        d.tasks = d.tasks.filter((t) => !ids.has(t.id));
       });
-      notify(`Deleted "${task.title}" (u to undo)`);
+      notify(`${tasks.length > 1 ? `Deleted ${tasks.length} tasks` : `Deleted "${tasks[0].title}"`} (u to undo)`);
+    },
+
+    /** Add and remove labels on several tasks. */
+    relabel(tasks: Task[], add: string[], remove: string[]) {
+      update('change labels', (d) => {
+        for (const task of tasks) {
+          const t = find(d, task.id)!;
+          t.labels = [...new Set([...t.labels.filter((l) => !remove.includes(l)), ...add])];
+        }
+      });
+      const parts = [...add.map((l) => '+#' + l), ...remove.map((l) => '-#' + l)].join(' ');
+      notify(`${parts} on ${tasks.length} task${tasks.length > 1 ? 's' : ''}`);
     },
 
     attach(id: string, atts: Attachment[]) {
@@ -113,51 +145,60 @@ export function useTaskActions() {
     quickAdd(suffix = '', onAdded?: (id: string) => void) {
       openModal((close) => <QuickAdd onClose={close} onAdd={(line) => onAdded?.(actions.add(`${line} ${suffix}`))} />);
     },
-    done(task: Task) {
+    done(tasks: Task[]) {
+      const one = tasks.length === 1 ? tasks[0] : null;
+      // Several tasks: a stand-in so the dialog shows "3 tasks" and never offers "not done".
+      const shown: Task = one ?? { ...tasks[0], title: `${tasks.length} tasks`, done: null, recur: tasks.some((t) => t.recur) ? 'yes' : null };
       openModal((close) => (
         <DonePrompt
-          task={task}
+          task={shown}
           today={today}
           onClose={close}
-          onDone={(date) => actions.complete(task.id, date)}
-          onReopen={() => actions.reopen(task.id)}
+          onDone={(date) => actions.complete(tasks.map((t) => t.id), date)}
+          onReopen={() => one && actions.reopen(one.id)}
         />
       ));
     },
     edit(task: Task) {
       openModal((close) => <EditTask task={task} onClose={close} onSave={actions.save} />);
     },
-    waiting(task: Task) {
-      if (task.waiting) {
+    /** Toggle: when all are waiting, stop waiting; otherwise ask on whom. */
+    waiting(tasks: Task[]) {
+      if (tasks.every((t) => t.waiting)) {
         update('stop waiting', (d) => {
-          find(d, task.id)!.waiting = null;
+          for (const t of tasks) find(d, t.id)!.waiting = null;
         });
-        return notify(`No longer waiting on ${task.waiting.on}`);
+        return notify(tasks.length > 1 ? `No longer waiting (${tasks.length})` : `No longer waiting on ${tasks[0].waiting!.on}`);
       }
       openModal((close) => (
         <Prompt
-          title="Waiting on…"
+          title={tasks.length > 1 ? `${tasks.length} tasks waiting on…` : 'Waiting on…'}
           label="Who / what"
           hint={<>e.g. Marc, Ops team, client answer · <kbd>⏎</kbd> save</>}
           validate={(v) => (v.trim() ? null : '!Type who or what you are waiting on')}
           onClose={close}
           onSubmit={(v) =>
             update('waiting', (d) => {
-              find(d, task.id)!.waiting = { on: v.trim(), since: today };
+              for (const t of tasks) {
+                const x = find(d, t.id)!;
+                // Keep the original "since" when it's already waiting on the same person.
+                x.waiting = { on: v.trim(), since: x.waiting?.on === v.trim() ? x.waiting.since : today };
+              }
             })
           }
         />
       ));
     },
-    snooze(task: Task) {
+    snooze(tasks: Task[]) {
+      const task = tasks[0];
       openModal((close) => (
         <Prompt
-          title="Snooze until…"
+          title={tasks.length > 1 ? `Snooze ${tasks.length} tasks until…` : 'Snooze until…'}
           label="Date"
-          initial={task.snooze_until ?? ''}
+          initial={tasks.length === 1 ? (task.snooze_until ?? '') : ''}
           hint={<>mon, +3, +2w, 2026-12-01 · empty = wake up now · <kbd>⏎</kbd> save</>}
           validate={(v) => {
-            if (!v.trim()) return task.snooze_until ? 'Remove snooze' : null;
+            if (!v.trim()) return tasks.some((t) => t.snooze_until) ? 'Remove snooze' : null;
             const d = parseDate(v, today);
             if (!d) return '!Unknown date';
             return d <= today ? '!Pick a date after today' : `Hidden until ${relDay(d, today)}`;
@@ -166,16 +207,40 @@ export function useTaskActions() {
           onSubmit={(v) => {
             const d = v.trim() ? parseDate(v, today) : null;
             update(d ? 'snooze' : 'unsnooze', (doc) => {
-              find(doc, task.id)!.snooze_until = d;
+              for (const t of tasks) find(doc, t.id)!.snooze_until = d;
             });
             notify(d ? `💤 Snoozed until ${relDay(d, today)}` : 'Snooze removed');
           }}
         />
       ));
     },
-    remove(task: Task) {
+    remove(tasks: Task[]) {
       openModal((close) => (
-        <Confirm text={<>Delete <strong>{task.title}</strong>?</>} onClose={close} onYes={() => actions.remove(task)} />
+        <Confirm
+          text={tasks.length > 1 ? <>Delete <strong>{tasks.length} tasks</strong>?</> : <>Delete <strong>{tasks[0].title}</strong>?</>}
+          onClose={close}
+          onYes={() => actions.remove(tasks)}
+        />
+      ));
+    },
+    /** `l`: "+#a -#b" adds/removes labels; a bare "#a" adds. */
+    labels(tasks: Task[]) {
+      openModal((close) => (
+        <Prompt
+          title={tasks.length > 1 ? `Labels for ${tasks.length} tasks` : 'Labels'}
+          label="Add / remove"
+          hint={<><code>#project:apollo</code> or <code>+#urgent</code> adds · <code>-#urgent</code> removes · <kbd>⏎</kbd> apply</>}
+          validate={(v) => {
+            const { add, remove } = parseRelabel(v, doc.settings.label_aliases);
+            if (!add.length && !remove.length) return v.trim() ? '!Use #label, +#label or -#label' : null;
+            return [...add.map((l) => '+#' + l), ...remove.map((l) => '-#' + l)].join(' ');
+          }}
+          onClose={close}
+          onSubmit={(v) => {
+            const { add, remove } = parseRelabel(v, doc.settings.label_aliases);
+            if (add.length || remove.length) actions.relabel(tasks, add, remove);
+          }}
+        />
       ));
     },
     /** `o`: open the Jira/link ref or an attachment. With one target it opens directly. */
